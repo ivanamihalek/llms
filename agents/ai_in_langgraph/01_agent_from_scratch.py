@@ -5,7 +5,6 @@ import os
 import re
 
 from dotenv import load_dotenv
-from google import genai
 from openai import OpenAI
 
 def hello_world(client):
@@ -27,6 +26,17 @@ def hello_world(client):
     print("Response from Gemini model:")
     print(response.text)
     # How can I help you today? Are you learning to program, or just saying hello?
+
+def manual_assistance(client):
+    abot = Agent(client, system=get_initial_prompt())  # init
+    assistant_instructions = abot("How much does a toy poodle weigh?")  # call
+    print("assistant_instructions:\n", assistant_instructions)
+
+    # the instructions:  average_dog_weight: Toy Poodle
+    # we are supposed to call this function and provide the answer
+    the_answer = average_dog_weight("Toy Poodle")
+    final_response = abot(f"Observation: {the_answer}")
+    print(final_response)
 
 def calculate(what):
     return eval(what)
@@ -103,17 +113,6 @@ You then output:
 Answer: A bulldog weights 51 lbs
 """.strip()
 
-def manual_assistance(client):
-    abot = Agent(client, system=get_initial_prompt())  # init
-    assistant_instructions = abot("How much does a toy poodle weigh?")  # call
-    print("assistant_instructions:\n", assistant_instructions)
-
-    # the instructions:  average_dog_weight: Toy Poodle
-    # we are supposed to call this function and provide the answer
-    the_answer = average_dog_weight("Toy Poodle")
-    final_response = abot(f"Observation: {the_answer}")
-    print(final_response)
-
 
 def main():
     # Load environment variables, including your API key
@@ -147,9 +146,7 @@ def main():
         result = bot(next_prompt)
         print("reply:\n", result)
         actions = [
-            action_re.match(a)
-            for a in result.split('\n')
-            if action_re.match(a)
+            action_re.match(a) for a in result.split('\n') if action_re.match(a)
         ]
         print("actions: ", [a.groups() for a in actions])
         if actions:
