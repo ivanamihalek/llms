@@ -10,7 +10,7 @@ import operator
 from langchain_core.messages import AnyMessage, SystemMessage, HumanMessage, ToolMessage, AIMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_tavily import TavilySearch
-
+from langgraph.checkpoint.sqlite import SqliteSaver
 
 class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], operator.add]
@@ -18,7 +18,7 @@ class AgentState(TypedDict):
 
 class Agent:
 
-    def __init__(self, model, tools, system=""):
+    def __init__(self, model, tools, checkpointer, system=""):
         self.system = system
         graph = StateGraph(AgentState)
         graph.add_node("llm", self.call_openai)
@@ -30,7 +30,7 @@ class Agent:
         )
         graph.add_edge("action", "llm")
         graph.set_entry_point("llm")
-        self.graph = graph.compile()
+        self.graph = graph.compile(checkpointer=checkpointer)
         self.tools = {t.name: t for t in tools}
         self.model = model.bind_tools(tools)
 
@@ -58,7 +58,6 @@ class Agent:
             results.append(ToolMessage(tool_call_id=t['id'], name=t['name'], content=str(result)))
         print("Back to the model!")
         return {'messages': results}
-
 
 def main():
     load_dotenv()
@@ -93,17 +92,25 @@ Rules:
         max_retries=2,
     )
 
-    abot = Agent(model, [tool], system=system_prompt)
+    with SqliteSaver.from_conn_string(":memory:") as memory:
+        abot = Agent(model, [tool], system=system_prompt, checkpointer=memory)
 
-    # Combine the example and the actual question
-    question = "What is the weather in sf?"
-    question = "who won the superbowl in 2024? WHat is the GDP of that state?"
-    messages = few_shot + [HumanMessage(content=question)]
+        question = "What is the weather in sf?"
+        messages = few_shot + [HumanMessage(content=question)]
+        thread = {"configurable": {"thread_id": "1"}}
 
-    result = abot.graph.invoke({"messages": messages})
-    # pprint(result)
-    print(result['messages'][-1].content)
-   
+        for event in abot.graph.stream({"messages": messages}, thread):
+            for v in event.values():
+                print(v['messages'])
+
+        print("\n\n\n")
+        messages = [HumanMessage(content="What about in la?")]
+        thread = {"configurable": {"thread_id": "1"}}
+        for event in abot.graph.stream({"messages": messages}, thread):
+            for v in event.values():
+                print(v)
+
+
 
 if __name__ == "__main__":
     main()
