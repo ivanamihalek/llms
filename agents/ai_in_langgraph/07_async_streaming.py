@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
+import asyncio
 import os
 import re
 from pprint import pprint
 
 from dotenv import load_dotenv
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, Annotated
 import operator
 from langchain_core.messages import AnyMessage, SystemMessage, HumanMessage, ToolMessage, AIMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_tavily import TavilySearch
-from langgraph.checkpoint.sqlite import SqliteSaver
+
 
 class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], operator.add]
@@ -59,7 +61,7 @@ class Agent:
         print("Back to the model!")
         return {'messages': results}
 
-def main():
+async def main():
     load_dotenv()
     tavily_api_key = os.getenv("TAVILY_API_KEY")
     tool = TavilySearch(tavily_api_key=tavily_api_key, max_results=4)
@@ -92,30 +94,23 @@ Rules:
         max_retries=2,
     )
 
-    with SqliteSaver.from_conn_string(":memory:") as memory:
+    async with AsyncSqliteSaver.from_conn_string(":memory:") as memory:
         abot = Agent(model, [tool], system=system_prompt, checkpointer=memory)
 
-        question = "What is the weather in sf?"
+        question = "What is the weather in SF?"
         messages = few_shot + [HumanMessage(content=question)]
-        thread = {"configurable": {"thread_id": "1"}}
+        thread = {"configurable": {"thread_id": "3"}}
+        async for event in abot.graph.astream_events({"messages": messages}, thread, version="v1"):
+            kind = event["event"]
+            if kind == "on_chat_model_stream":
+                content = event["data"]["chunk"].content
+                if content:
+                    # Empty content in the context of OpenAI means
+                    # that the model is asking for a tool to be invoked.
+                    # So we only print non-empty content
+                    print(content, end="|")
 
-        for event in abot.graph.stream({"messages": messages}, thread):
-            for v in event.values():
-                print(v['messages'][-1].content)
 
-        print("\n\n\n")
-        messages = [HumanMessage(content="What about in la?")]
-        thread = {"configurable": {"thread_id": "1"}}
-        for event in abot.graph.stream({"messages": messages}, thread):
-            for v in event.values():
-                print(v['messages'][-1].content)
-
-        print("\n\n\n")
-        messages = [HumanMessage(content="Which one is warmer?")]
-        thread = {"configurable": {"thread_id": "1"}}
-        for event in abot.graph.stream({"messages": messages}, thread):
-            for v in event.values():
-                print(v['messages'][-1].content)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
