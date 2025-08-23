@@ -38,6 +38,7 @@ class Agent:
         result = state['messages'][-1]
         return len(result.tool_calls) > 0
 
+    # THIS IS THE SYNCH STREAMING (USING INVOKE)
     def call_openai(self, state: AgentState):
         messages = state['messages']
         if self.system:

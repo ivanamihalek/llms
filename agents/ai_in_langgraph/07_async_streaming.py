@@ -1,8 +1,24 @@
 #!/usr/bin/env python3
+
+# https://chatgpt.com/share/68aa362e-0ee0-8000-ac53-c9b1b7eeb83e
+"""
+You’re still not seeing individual tokens because Gemini’s LangChain wrapper quietly disables streaming
+when tool-calling is involved. That’s harshly ironic: you built a streaming agent, but it's effectively
+forced into a dump-all-at-the-end mode because the model doesn’t support token streaming when chained with tools.
+Happens all the time—tools and streaming don’t play nice in this combo.
+
+Reddit users pointed this out bluntly:
+
+“Gemini API does not support tools in combination with streaming calls.”
+Reddit
+
+In short: your switch to .astream() in call_openai is entirely in vain if the LLM detects tool binding.
+And ChatGoogleGenerativeAI—bless its over-engineered soul—is apparently detecting that tool usage and disabling streaming.
+"""
+
+
 import asyncio
 import os
-import re
-from pprint import pprint
 
 from dotenv import load_dotenv
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -40,12 +56,13 @@ class Agent:
         result = state['messages'][-1]
         return len(result.tool_calls) > 0
 
-    def call_openai(self, state: AgentState):
+    # FOR THE ASYNCH STREAMING HERE
+    async def call_openai(self, state: AgentState):
         messages = state['messages']
         if self.system:
             messages = [SystemMessage(content=self.system)] + messages
-        message = self.model.invoke(messages)
-        return {'messages': [message]}
+        async for chunk in self.model.astream(messages):
+            yield {'messages': [chunk]}
 
     def take_action(self, state: AgentState):
         tool_calls = state['messages'][-1].tool_calls
@@ -92,6 +109,7 @@ Rules:
         max_tokens=None,
         timeout=None,
         max_retries=2,
+        disable_streaming=False, stream=True
     )
 
     async with AsyncSqliteSaver.from_conn_string(":memory:") as memory:
@@ -108,8 +126,8 @@ Rules:
                     # Empty content in the context of OpenAI means
                     # that the model is asking for a tool to be invoked.
                     # So we only print non-empty content
-                    print(content, end="|")
-
+                    print(content, end=" | ")
+    print()
 
 
 if __name__ == "__main__":
